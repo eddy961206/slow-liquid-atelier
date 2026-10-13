@@ -13,3 +13,11 @@ This export matches the published v1. The later unpublished visual-rework candid
 ## Third-party code
 
 Vendored Three.js files retain their MIT notice in `dist/vendor/THREE-LICENSE`. No project-wide license is assigned by this export.
+
+
+## 미리보기 환경 제한
+
+캡처 환경의 WebGL 비활성화로 표시된 실제 안내 화면. 정상 3D 렌더 결과를 보여주는 이미지가 아닙니다.
+
+![캡처 환경의 WebGL 비활성화로 표시된 실제 안내 화면. 정상 3D 렌더 결과를 보여주는 이미지가 아닙니다.](docs/screenshots/overview.png)
+
