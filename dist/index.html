@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101014"><meta name="description" content="천천히 흐르는 빛과 물방울. 네 가지 실시간 3D 감각 장난감."><title>slow · 물멍</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%23101014'/%3E%3Cpath d='M16 5C13 10 8 16 8 21a8 8 0 0016 0c0-5-5-11-8-16' fill='%2365d8ed'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}</script>
+</head>
+<body>
+<main id="experience" aria-label="실시간 3D 물멍 장난감">
+<div id="stage" role="img" aria-label="유리 속을 천천히 흐르는 오일 방울. 드래그하면 다른 각도로 볼 수 있습니다."></div>
+<div id="loading"><span class="load-drop"></span><span>빛을 담는 중</span></div>
+<div id="webgl-error" hidden><h1>잠시, 유리를 닦는 중</h1><p>이 브라우저에서 3D 화면을 열 수 없어요.<br>하드웨어 가속을 켜거나 최신 브라우저에서 다시 열어 주세요.</p><button onclick="location.reload()">다시 열기</button></div>
+<header class="chrome"><div class="brand"><span>slow</span><i></i><span class="brand-sub">물멍</span></div><div class="header-actions"><button id="focus" class="text-button" title="화면에 몰입하기 (H)"><span>몰입 모드</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button></div></header>
+<section class="intro chrome"><h1 id="toy-title">오일 캐스케이드</h1><p id="toy-desc">천천히, 흘러가는 대로</p></section>
+<div class="side-note chrome"><span>드래그해서 둘러보기</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8l-4 4 4 4m10-8 4 4-4 4M3 12h18"/></svg></div>
+<div class="bottom chrome">
+<div class="transport" aria-label="재생 및 색상 조절">
+<button id="play" class="round-button" aria-label="일시정지" title="일시정지 (Space)"><svg id="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg><svg id="play-icon" hidden viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+<span class="divider"></span><button id="speed" title="재생 속도 바꾸기" aria-label="재생 속도 1배">1×</button><span class="divider"></span>
+<div class="palettes" aria-label="빛의 색"><button class="swatch active" data-palette="0" aria-label="산호와 바다 색상" aria-pressed="true" style="--swatch:#65d8ed"></button><button class="swatch" data-palette="1" aria-label="햇살과 꿀 색상" aria-pressed="false" style="--swatch:#ee967f"></button><button class="swatch" data-palette="2" aria-label="보랏빛 꿈 색상" aria-pressed="false" style="--swatch:#a89bc9"></button></div>
+<span class="divider"></span><button id="interact" class="icon-button" aria-label="뒤집기" title="뒤집기 (R)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a8 8 0 10.5 7M19 3v5h-5"/></svg></button>
+</div>
+<nav class="toys" aria-label="장난감 고르기"><button class="toy active" data-toy="0" aria-pressed="true"><span>캐스케이드</span></button><button class="toy" data-toy="1" aria-pressed="false"><span>라바 램프</span></button><button class="toy" data-toy="2" aria-pressed="false"><span>리퀴드 오빗</span></button><button class="toy" data-toy="3" aria-pressed="false"><span>빛의 파도</span></button></nav>
+</div>
+<button id="exit-focus" title="컨트롤 보이기 (H)" aria-label="컨트롤 보이기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h5V3m13 5h-5V3M8 21v-5H3m13 5v-5h5"/></svg></button>
+<div id="toast" role="status" aria-live="polite"></div>
+<div class="quiet-note chrome">소리 없이, 잠시 쉬어 가요</div>
+</main>
+<script type="module" src="./app.js"></script>
+</body></html>
