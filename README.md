@@ -1,23 +1,60 @@
-# Slow Liquid Atelier
+# slow · 물멍
 
-Four procedural Three.js liquid-and-light toys.
+조용한 스튜디오에서 액체, 물결, 모래, 진자를 바라보는 실시간 3D 아틀리에.
 
-## Run
+![실제 Chrome에서 실행한 리퀴드 오빗](docs/screenshots/overview.png)
 
-Serve `dist/` with a static HTTP server, for example `python3 -m http.server 8000 --directory dist`, then open http://localhost:8000. No build or API key is required.
+## 실행
 
-## Limitations
+외부 API, 설치할 패키지, 빌드 과정이 필요하지 않아. 저장소 폴더에서 정적 서버를 실행해.
 
-This export matches the published v1. The later unpublished visual-rework candidate is not included. Actual WebGL appearance, real-device interaction and mobile performance were not verified. This is a stylized visual simulation, not a physical fluid solver.
+```sh
+python3 -m http.server 5173 --bind 127.0.0.1 --directory dist
+```
 
-## Third-party code
+브라우저에서 [http://localhost:5173](http://localhost:5173)을 열면 돼.
 
-Vendored Three.js files retain their MIT notice in `dist/vendor/THREE-LICENSE`. No project-wide license is assigned by this export.
+## 여섯 가지 컬렉션
 
+| 컬렉션 | 움직임 |
+| --- | --- |
+| 오일 캐스케이드 | 중력과 경사면 충돌을 계산하는 점성 방울. 용기를 뒤집으면 중력 방향도 연속해서 바뀜 |
+| 라바 램프 | 덩어리별 온도와 부력을 유지하는 대류. 서로 다른 속도로 뜨고 가라앉음 |
+| 리퀴드 오빗 | 합쳐지는 두 액체의 흐름. 천천히 변하는 반지름과 기울기로 짧은 고정 루프를 피함 |
+| 잔잔한 수조 | 높이와 속도를 적분하는 물결. 무작위 위치의 작은 파문이 만나고 벽에서 반사됨 |
+| 모래의 궤적 | 구슬이 실제 높이장에 홈과 둔덕을 남김. 기존 자국을 유지하면서 다음 곡선을 그림 |
+| 느린 균형 | 고정 시간 간격으로 적분하는 이중 진자. 이전 상태에서 다음 움직임을 계산함 |
 
-## 미리보기 환경 제한
+리퀴드 오빗과 라바는 표면을 실시간으로 재구성해. 재생 영상을 되감는 방식이 아니야. 모래의 초기 나선도 사진이나 텍스처 대신 실제 표면 높이로 새겨져 있어.
 
-캡처 환경의 WebGL 비활성화로 표시된 실제 안내 화면. 정상 3D 렌더 결과를 보여주는 이미지가 아닙니다.
+## 조작
 
-![캡처 환경의 WebGL 비활성화로 표시된 실제 안내 화면. 정상 3D 렌더 결과를 보여주는 이미지가 아닙니다.](docs/screenshots/overview.png)
+- 드래그: 시점 회전. 스크롤: 확대·축소. 더블 클릭: 처음 시점.
+- `Space`: 재생·정지. `R`: 현재 장면에 힘 주기. `H`: 몰입 모드. `Esc`: 몰입 모드 종료.
+- `1`~`6`: 컬렉션 선택.
+- 3D 화면에 키보드 초점을 두면 방향키로 회전하고 `+`/`-`로 확대·축소할 수 있어. `Home`으로 시점을 초기화해.
+- 모바일에서는 아래 컬렉션을 좌우로 밀어서 나머지 장면을 고를 수 있어.
 
+`prefers-reduced-motion` 설정에서는 처음에 정지 상태로 열려. 탭이 보이지 않을 때는 계산을 쉬고, 일시정지 중에는 화면이 바뀔 때만 다시 그려.
+
+## 구현과 검증
+
+- Three.js를 저장소에 포함해서 런타임 CDN에 의존하지 않아.
+- 큰 스튜디오 광원, 유리 두께·굴절률·흡수색, 부드러운 바닥 반사를 사용해. Bloom이나 렌즈 플레어는 사용하지 않아.
+- 겹친 유리와 액체는 별도 장면 버퍼로 처리해. 바닥의 반사 카메라는 해당 시점의 투과 버퍼를 사용해.
+- Node.js 22 이상에서 추가 패키지 설치 없이 검사할 수 있어.
+
+```sh
+npm run check
+npm test
+```
+
+Chrome의 실제 WebGL 화면, 데스크톱 1536×1024, 모바일 크기 390×844, 가로 화면 844×390에서 확인했어. 테스트는 장시간 좌표 안정성, 물결 법선, 모래 자국 유지, 일시정지, 연속 충격, 진자의 프레임 속도 독립성을 다뤄.
+
+수치 계산과 재질은 감각적인 화면을 위한 근사 모델이야. 정밀한 전산유체역학이나 광선 추적 결과는 아니야. 실제 iPhone/Safari 및 다른 GPU에서의 장시간 성능은 아직 확인하지 않았어. 기기 성능이 낮으면 해상도를 줄여.
+
+## 참고 자료와 라이선스
+
+구현에 참고한 원본과 적용 범위는 [리서치 기록](docs/REFERENCES.md), 화면 검증은 [디자인 QA](design-qa.md)에 적었어. [디자인 참고 이미지](docs/design-reference.png)는 이미지 생성으로 만든 방향성 자료이며 실제 실행 화면과 구분돼.
+
+포함된 Three.js와 addon은 [MIT 고지](dist/vendor/THREE-LICENSE)를 유지해. 외부 프로젝트의 코드나 이미지를 추가로 복사하지 않았어. 이 저장소 전체에 대한 별도 라이선스는 아직 지정하지 않았어.

@@ -1,0 +1,10 @@
+{
+  "name": "slow-liquid-atelier",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 5173 --bind 127.0.0.1 --directory dist",
+    "test": "node --import ./tests/register-three.mjs --test ./tests/physics.test.mjs",
+    "check": "node --check dist/app.js && node --check dist/studio.js && node --check dist/cascade-physics.js && node --check dist/fluid-dynamics.js && node --check dist/tidal-pool.js && node --check dist/sandscape.js && node --check dist/kinetic-pendulum.js"
+  }
+}

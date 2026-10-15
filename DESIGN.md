@@ -1,7 +1,15 @@
 # slow · 물멍
-Visual thesis: A dark, quiet optical atelier. One luminous sculptural glass toy is the whole experience.
-Ink #101014, plum #211b27, cyan #65D8ED, coral #EE967F, lavender #A89BC9.
-Desktop composition: small thin slow wordmark top left, focus top right; sparse light-weight Korean title at 4.7vw / 35.5vh; object at 56% horizontal center; transport at lower center; single fine-line toy selector across bottom.
-Concept copy: slow / 물멍 / 몰입 모드 / 오일 캐스케이드 / 천천히, 흘러가는 대로 / 캐스케이드 / 라바 램프 / 리퀴드 오빗 / 빛의 파도 / 1×.
-Intentional functional additions: flip/stir/reset control, transient feedback, drag hint and accessible labels. Mobile title moves above sculpture with compact lower controls. True real-time procedural 3D replaces the reference's static photorealistic object. No generated screenshot or sprites are presented as 3D.
-Each toy: cascade in a rounded glass timer with dual oils and six ramps; merging hot lava in a tapered glass lamp; orbital fluid in a globe; two-layer wave vessel with glitter.
+
+어두운 촬영 스튜디오에 놓인 실제 감각 조형물을 바라보는 경험. 움직임과 재질이 주인공이며, 강한 발광이나 장식성 입자로 시선을 끌지 않는다.
+
+- 배경 #101114, 따뜻한 회백색 글자, 낮은 대비의 얇은 구분선.
+- 작은 italic serif slow 브랜드, 얇은 시스템 한글 글꼴, 열린 여백과 큰 두 줄 제목.
+- 조형물은 데스크톱 오른쪽, 모바일은 설명 아래. 재생 조작부와 컬렉션은 하단.
+- 여섯 장면: 점성 방울의 경사면, 열 대류, 유리 오빗, 간섭하는 물결, 누적 모래 흔적, 이중 진자.
+- 비금속 액체와 유리의 투과를 구분한다. 외부 유리의 장면 버퍼와 바닥 반사의 시점을 분리한다.
+- 광원은 유한한 크기의 스튜디오 softbox와 절제한 보조광. Bloom, 색수차, 렌즈 플레어는 없다.
+- 물결은 높이와 법선을 함께 바꾸며 모래는 실제 geometry에 홈을 새긴다.
+- 시간 기반 단순 왕복 대신 상태를 유지하는 계산을 기본으로 한다. 장면 전환은 새 조형물을 시작하지만 재생 중 정해진 시간에 전체 상태를 되감지 않는다.
+- 실제 iOS 터치와 GPU 성능은 별도 검증이 필요하다. 실시간 유체는 현실의 정밀 복제가 아닌 시각적 근사다.
+
+`docs/design-reference.png`는 Image Gen 방향성 자료다. 런타임에 정지 사진을 조형물처럼 표시하지 않는다. 원래 4개였던 하단 컬렉션은 사용자 요청으로 6개로 확장했고, 작은 화면에서는 좌우로 이동한다.
