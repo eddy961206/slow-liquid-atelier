@@ -1,0 +1,61 @@
+{
+  "capturedDate": "2026-10-15",
+  "sourceCommit": "c052d0dffa9c166aa1c0a9ecda0d30e66513236f",
+  "source": "Actual Chrome WebGL screencast; immersive mode; playback 1x",
+  "viewport": [
+    1000,
+    800
+  ],
+  "crop": [
+    140,
+    20,
+    720,
+    760
+  ],
+  "fps": 10,
+  "loop": "Each GIF repeats its excerpt; the app continues its stateful simulation.",
+  "gifs": [
+    {
+      "file": "cascade.gif",
+      "width": 480,
+      "height": 507,
+      "frames": 120,
+      "seconds": 12.0
+    },
+    {
+      "file": "lava-lamp.gif",
+      "width": 480,
+      "height": 507,
+      "frames": 162,
+      "seconds": 16.2
+    },
+    {
+      "file": "liquid-orbit.gif",
+      "width": 480,
+      "height": 507,
+      "frames": 120,
+      "seconds": 12.0
+    },
+    {
+      "file": "tidal-pool.gif",
+      "width": 480,
+      "height": 507,
+      "frames": 120,
+      "seconds": 12.0
+    },
+    {
+      "file": "sand-table.gif",
+      "width": 480,
+      "height": 507,
+      "frames": 160,
+      "seconds": 16.0
+    },
+    {
+      "file": "double-pendulum.gif",
+      "width": 480,
+      "height": 507,
+      "frames": 120,
+      "seconds": 12.0
+    }
+  ]
+}
