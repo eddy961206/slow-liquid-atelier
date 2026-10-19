@@ -15,6 +15,18 @@
 | [Mathmos FAQ](https://mathmos.com/faq/) | 제작사 설명 | 가열·냉각에 따라 부력이 달라지는 왁스. 각 덩어리의 온도와 상승/하강 상태를 유지 |
 | [DuneScape](https://github.com/otto-link/DuneScape), [Sachiko Kodama](https://www.kodama.hc.uec.ac.jp/index-pf08.html) | MIT 프로젝트 / 작가 원본 | 사구와 자성 유체도 비교했지만, 이번에는 모래 흔적·수조·이중 진자를 추가하는 방향을 선택 |
 
+## 렌더러 개편에 참고한 자료
+
+| 자료 | 종류 | 적용한 내용 |
+| --- | --- | --- |
+| [Inigo Quilez, smooth minimum](https://iquilezles.org/articles/smin/) | 기법 설명 | 메타볼 액체를 다항식 smooth-min SDF로 합침 |
+| Simon Green, *Screen Space Fluid Rendering* (NVIDIA, GDC 2010) | 발표 자료 | 두께 기반 Beer–Lambert 흡수, 프레넬 반사와 굴절의 혼합으로 액체 색을 만듦 |
+| [Codrops: Liquid Raymarching Scene](https://tympanus.net/codrops/?p=78977) | 튜토리얼 | 레이마칭 루프와 SDF 법선 계산 구조 확인 |
+| [drei MeshTransmissionMaterial](https://drei.docs.pmnd.rs/shaders/mesh-transmission-material) | 라이브러리 문서 | 별도 장면 버퍼로 중첩 투과를 처리하는 방식(코드는 복사하지 않음) |
+| Three.js r180 `cube_uv_reflection_fragment` | 포함된 MIT 코드 | 레이마칭 셰이더에서 PMREM 환경맵을 샘플링 |
+
+코드를 그대로 가져온 외부 프로젝트는 없다. 위 기법은 `dist/liquid.js`, `dist/studio.js`, `dist/tidal-pool.js`에 직접 구현했다.
+
 ## 반복이 덜 드러나게 한 방법
 
 - 물결, 진자, 대류는 이전 상태에서 다음 상태를 계산한다. 정해진 길이의 영상을 반복하거나 일정 시각에 전체 위치를 초기화하지 않는다.

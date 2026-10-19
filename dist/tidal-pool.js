@@ -1,35 +1,57 @@
 import * as THREE from "three";
+import { stoneTextures } from "./textures.js";
 
-// A shallow elliptical ceramic pool with a damped finite-difference water surface.
-export function createTidalPool({ model, materials, palette }) {
+// A shallow elliptical stone basin with a damped finite-difference water
+// surface. The water refracts the basin floor, and the floor carries caustics
+// computed from the live wave field: wave crests focus light, troughs spread it.
+export function createTidalPool({ model, materials, palette, env }) {
   const group = new THREE.Group();
   group.position.y = -0.5;
   group.rotation.x = 0;
   model.add(group);
-  const ceramic = new THREE.MeshStandardMaterial({
-    color: 0x787d78,
-    roughness: 0.86,
-    metalness: 0.02,
+  const stoneTex = stoneTextures({
+    size: 512,
+    base: "#8d897f",
+    dark: "#6e6a62",
+    light: "#aaa59a",
+    speckle: 0.7,
+    period: 5,
+    seed: 11,
+    repeat: [2, 1.3],
   });
-  const bottomMaterial = new THREE.MeshStandardMaterial({
-    color: 0x344d4e,
-    roughness: 0.72,
+  const ceramic = new THREE.MeshPhysicalMaterial({
+    color: "#ffffff",
+    map: stoneTex.map,
+    bumpMap: stoneTex.bump,
+    bumpScale: 1.2,
+    roughness: 0.82,
+    metalness: 0,
+  });
+  const bottomMaterial = new THREE.MeshPhysicalMaterial({
+    color: "#b4bdb6",
+    map: stoneTex.map,
+    bumpMap: stoneTex.bump,
+    bumpScale: 0.8,
+    roughness: 0.55,
   });
   const waterMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xb7d7d7,
-    roughness: 0.055,
+    color: 0xffffff,
+    roughness: 0.02,
     metalness: 0,
-    transmission: 0.86,
-    thickness: 0.24,
+    transmission: 1,
+    thickness: 0.45,
     ior: 1.333,
     transparent: false,
     opacity: 1,
-    clearcoat: 0,
-    clearcoatRoughness: 0.16,
-    attenuationColor: new THREE.Color(0x406e72),
-    attenuationDistance: 3.5,
-    side: THREE.DoubleSide,
+    specularIntensity: 1,
+    attenuationColor: new THREE.Color(0x4f8a84),
+    attenuationDistance: 1.4,
+    side: THREE.FrontSide,
   });
+  if (env) {
+    waterMaterial.envMap = env;
+    waterMaterial.envMapIntensity = 0.28;
+  }
   waterMaterial.onBeforeCompile = (shader) => {
     shader.vertexShader = "varying vec2 vWaterXZ;\n" + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
@@ -42,28 +64,68 @@ export function createTidalPool({ model, materials, palette }) {
       "#include <clipping_planes_fragment>\nif(dot(vWaterXZ/vec2(2.205,1.365),vWaterXZ/vec2(2.205,1.365))>1.)discard;",
     );
   };
-  // Solid bottom and a continuous raised lip: no nested transparent enclosure.
+  waterMaterial.customProgramCacheKey = () => "atelier-water-v2";
+
+  // Basin: a thick honed-stone lip around a recessed floor.
   const bottom = new THREE.Mesh(
-    new THREE.CylinderGeometry(1, 1, 0.15, 96),
+    new THREE.CylinderGeometry(1, 1, 0.15, 128),
     bottomMaterial,
   );
   bottom.scale.set(2.18, 1, 1.34);
-  bottom.position.y = -0.19;
+  bottom.position.y = -0.34;
   group.add(bottom);
   const profile = [
-    new THREE.Vector2(0.94, -0.23),
-    new THREE.Vector2(1, -0.23),
-    new THREE.Vector2(1.055, -0.17),
-    new THREE.Vector2(1.066, -0.06),
-    new THREE.Vector2(1.048, 0.055),
-    new THREE.Vector2(1.025, 0.075),
-    new THREE.Vector2(1.002, 0.052),
-    new THREE.Vector2(0.985, -0.09),
-    new THREE.Vector2(0.94, -0.13),
-  ];
-  const rim = new THREE.Mesh(new THREE.LatheGeometry(profile, 96), ceramic);
+    [0.9, -0.27],
+    [0.975, -0.26],
+    [1.005, -0.19],
+    [1.012, 0.02],
+    [1.02, 0.065],
+    [1.045, 0.085],
+    [1.11, 0.085],
+    [1.14, 0.06],
+    [1.15, -0.05],
+    [1.14, -0.36],
+    [1.12, -0.41],
+    [0.9, -0.41],
+  ]
+    // Outer wall first so Lathe normals face out of the stone everywhere.
+    .reverse()
+    .map(([x, y]) => new THREE.Vector2(x, y));
+  const rim = new THREE.Mesh(
+    new THREE.LatheGeometry(
+      new THREE.SplineCurve(profile).getPoints(90),
+      160,
+    ),
+    ceramic,
+  );
   rim.scale.set(2.18, 1, 1.34);
   group.add(rim);
+
+  // Smooth river pebbles resting under the water.
+  const pebbleGeometry = new THREE.SphereGeometry(1, 32, 20);
+  const pebbleColors = ["#55585a", "#6f6b63", "#3f4245", "#7d786e", "#4b4d4a"];
+  const pebbles = [
+    [0.9, 0.35, 0.16, 0.055, 0.12, 0.5],
+    [1.18, 0.12, 0.11, 0.045, 0.09, 1.3],
+    [-0.4, 0.62, 0.13, 0.05, 0.1, 2.0],
+    [0.35, -0.55, 0.1, 0.04, 0.08, 0.2],
+    [-1.05, 0.25, 0.09, 0.035, 0.07, 2.6],
+    [1.45, -0.3, 0.14, 0.05, 0.11, 0.9],
+    [-0.1, 0.05, 0.075, 0.03, 0.06, 1.7],
+  ];
+  pebbles.forEach(([x, z, sx, sy, sz, rot], k) => {
+    const m = new THREE.Mesh(
+      pebbleGeometry,
+      new THREE.MeshPhysicalMaterial({
+        color: pebbleColors[k % pebbleColors.length],
+        roughness: 0.5,
+      }),
+    );
+    m.scale.set(sx, sy, sz);
+    m.rotation.y = rot;
+    m.position.set(x, -0.265 + sy * 0.55, z);
+    group.add(m);
+  });
 
   const nx = 81,
     nz = 55,
@@ -109,16 +171,19 @@ export function createTidalPool({ model, materials, palette }) {
   group.add(water);
 
   // One rounded river stone rises through the water near the rear edge.
-  const stoneMaterial = new THREE.MeshStandardMaterial({
-    color: 0x5c625e,
-    roughness: 0.48,
+  const stoneMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x6d6c66,
+    map: stoneTex.map,
+    bumpMap: stoneTex.bump,
+    bumpScale: 1.5,
+    roughness: 0.7,
   });
   const stone = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 28, 18),
+    new THREE.SphereGeometry(1, 40, 24),
     stoneMaterial,
   );
-  stone.position.set(-1.35, -0.075, -0.58);
-  stone.scale.set(0.28, 0.16, 0.21);
+  stone.position.set(-1.35, -0.12, -0.58);
+  stone.scale.set(0.28, 0.2, 0.21);
   group.add(stone);
   // Remove covered cells from propagation; the submerged stone reflects waves.
   for (let i = 0; i < count; i++) {
@@ -126,6 +191,65 @@ export function createTidalPool({ model, materials, palette }) {
     const sz = (positions[i * 3 + 2] + 0.58) / 0.19;
     if (sx * sx + sz * sz < 1) active[i] = 0;
   }
+
+  // The wave heightfield as a texture, read by the basin floor for caustics.
+  const heightData = new Float32Array(count);
+  const heightTexture = new THREE.DataTexture(
+    heightData,
+    nx,
+    nz,
+    THREE.RedFormat,
+    THREE.FloatType,
+  );
+  heightTexture.magFilter = heightTexture.minFilter = THREE.LinearFilter;
+  heightTexture.needsUpdate = true;
+  const causticUniforms = {
+    causticHeight: { value: heightTexture },
+    causticTexel: { value: new THREE.Vector2(1 / nx, 1 / nz) },
+    causticTime: { value: 0 },
+  };
+  bottomMaterial.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, causticUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec2 vPool;")
+      .replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvPool = position.xz * vec2(2.18, 1.34);",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        uniform sampler2D causticHeight;uniform vec2 causticTexel;uniform float causticTime;varying vec2 vPool;
+        float ambientCaustic(vec2 p, float t){
+          float c = 0.0;
+          for (int k = 0; k < 3; k++) {
+            float a = float(k) * 2.094 + 0.4;
+            vec2 d = vec2(cos(a), sin(a));
+            float w = sin(dot(p, d) * 5.5 + t * (0.5 + 0.17 * float(k)) + sin(dot(p, vec2(-d.y, d.x)) * 2.7 + t * 0.35) * 1.4);
+            c += pow(1.0 - abs(w), 7.0);
+          }
+          return c / 3.0;
+        }`,
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `{
+          vec2 uv = vPool / vec2(4.42, 2.74) + 0.5;
+          float h = texture2D(causticHeight, uv).r;
+          float lap = texture2D(causticHeight, uv + vec2(causticTexel.x, 0.)).r
+            + texture2D(causticHeight, uv - vec2(causticTexel.x, 0.)).r
+            + texture2D(causticHeight, uv + vec2(0., causticTexel.y)).r
+            + texture2D(causticHeight, uv - vec2(0., causticTexel.y)).r - 4.0 * h;
+          float focus = clamp(-lap * 260.0, -0.6, 2.5);
+          float edge = smoothstep(1.0, 0.82, length(vPool / vec2(2.1, 1.3)));
+          float ambient = ambientCaustic(vPool * 1.3, causticTime) * edge;
+          outgoingLight *= 0.8 + focus * 0.8 * edge + ambient * 0.38;
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  bottomMaterial.customProgramCacheKey = () => "atelier-caustics-v1";
 
   let accumulator = 0,
     clock = 0,
@@ -212,16 +336,15 @@ export function createTidalPool({ model, materials, palette }) {
     }
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
+    heightData.set(height);
+    heightTexture.needsUpdate = true;
+    causticUniforms.causticTime.value = clock;
   }
   function setPalette(p) {
-    // Restrained basin colors keep the water readable across the app's palettes.
-    ceramic.color.set(
-      p?.name === "보랏빛 꿈"
-        ? 0x96958a
-        : p?.name === "햇살과 꿀"
-          ? 0x8e7c65
-          : 0x787d78,
-    );
+    // A restrained tint: clear, slightly green water that leans to the palette.
+    waterMaterial.attenuationColor
+      .set(0x4f8a84)
+      .lerp(new THREE.Color(p?.a || "#159aab"), 0.35);
   }
   setPalette(palette);
   return {
@@ -229,6 +352,12 @@ export function createTidalPool({ model, materials, palette }) {
     setPalette,
     kick() {
       impulse(0.15, 0.12, -0.52);
+    },
+    dispose() {
+      heightTexture.dispose();
+      stoneTex.map.dispose();
+      stoneTex.bump.dispose();
+      pebbleGeometry.dispose();
     },
   };
 }

@@ -1,64 +1,117 @@
 import * as THREE from "three";
+import { stoneTextures } from "./textures.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
 export function createKineticPendulum({ model, materials, palette }) {
-  const brass = new THREE.MeshStandardMaterial({
-    color: 0xb49659,
-    metalness: 0.85,
-    roughness: 0.25,
+  const brass = new THREE.MeshPhysicalMaterial({
+    color: 0xd8b878,
+    metalness: 1,
+    roughness: 0.18,
   });
-  const copper = new THREE.MeshStandardMaterial({
-    color: 0xae7960,
-    metalness: 0.82,
-    roughness: 0.29,
+  const copper = new THREE.MeshPhysicalMaterial({
+    color: 0xc98a6b,
+    metalness: 1,
+    roughness: 0.2,
   });
-  const walnut = new THREE.MeshStandardMaterial({
-    color: 0x36251c,
-    roughness: 0.68,
+  const marbleTex = stoneTextures({
+    size: 512,
+    base: "#2a2a2c",
+    dark: "#18181a",
+    light: "#55555a",
+    speckle: 0.2,
+    veins: 1,
+    period: 4,
+    seed: 31,
+    repeat: [1.6, 0.6],
   });
-  const black = new THREE.MeshStandardMaterial({
-    color: 0x202522,
-    metalness: 0.7,
-    roughness: 0.36,
+  const marble = new THREE.MeshPhysicalMaterial({
+    color: "#ffffff",
+    map: marbleTex.map,
+    roughness: 0.3,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.12,
+  });
+  const black = new THREE.MeshPhysicalMaterial({
+    color: 0x111214,
+    metalness: 0.75,
+    roughness: 0.3,
+    clearcoat: 0.5,
+    clearcoatRoughness: 0.2,
   });
   const group = new THREE.Group();
   model.add(group);
-  function box(w, h, d, material, x, y, z) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  function add(geometry, material, x, y, z) {
+    const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
     group.add(mesh);
     return mesh;
   }
-  box(3.65, 0.24, 0.9, walnut, 0, -2.3, 0);
-  box(3.48, 0.055, 0.81, brass, 0, -2.165, 0);
-  box(0.13, 4.66, 0.16, black, -1.67, 0.18, -0.29);
-  box(0.13, 4.66, 0.16, black, 1.67, 0.18, -0.29);
-  box(3.47, 0.13, 0.16, black, 0, 2.44, -0.29);
-  box(0.11, 1.88, 0.13, brass, 0, 1.49, -0.29);
+  // A heavy stone plinth with an inset brass line.
+  add(new RoundedBoxGeometry(3.7, 0.3, 0.98, 6, 0.07), marble, 0, -2.3, 0);
+  add(new RoundedBoxGeometry(3.4, 0.022, 0.03, 2, 0.01), brass, 0, -2.29, 0.492);
+  // One bent steel bar forms both posts and the beam.
+  const frameCurve = new THREE.CurvePath();
+  const post = 1.67,
+    top = 2.44,
+    bend = 0.32,
+    zf = -0.29;
+  frameCurve.add(new THREE.LineCurve3(
+    new THREE.Vector3(-post, -2.16, zf),
+    new THREE.Vector3(-post, top - bend, zf),
+  ));
+  frameCurve.add(new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(-post, top - bend, zf),
+    new THREE.Vector3(-post, top, zf),
+    new THREE.Vector3(-post + bend, top, zf),
+  ));
+  frameCurve.add(new THREE.LineCurve3(
+    new THREE.Vector3(-post + bend, top, zf),
+    new THREE.Vector3(post - bend, top, zf),
+  ));
+  frameCurve.add(new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(post - bend, top, zf),
+    new THREE.Vector3(post, top, zf),
+    new THREE.Vector3(post, top - bend, zf),
+  ));
+  frameCurve.add(new THREE.LineCurve3(
+    new THREE.Vector3(post, top - bend, zf),
+    new THREE.Vector3(post, -2.16, zf),
+  ));
+  add(new THREE.TubeGeometry(frameCurve, 240, 0.055, 20, false), black, 0, 0, 0);
+  for (const x of [-post, post]) {
+    // Turned collars where the posts meet the plinth.
+    add(new THREE.CylinderGeometry(0.09, 0.11, 0.08, 32), brass, x, -2.11, zf);
+  }
+  // Hanger from the beam to the pivot.
+  const hanger = add(new THREE.CylinderGeometry(0.03, 0.03, 1.86, 24), brass, 0, 1.5, zf);
+  hanger.castShadow = true;
+  add(new RoundedBoxGeometry(0.2, 0.2, 0.34, 4, 0.05), black, 0, 0.55, -0.16);
   const bearing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.135, 0.033, 12, 48),
+    new THREE.TorusGeometry(0.1, 0.024, 16, 48),
     brass,
   );
-  bearing.position.set(0, 0.55, -0.08);
+  bearing.position.set(0, 0.55, 0.02);
   group.add(bearing);
   const axle = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.058, 0.058, 0.34, 24),
-    black,
+    new THREE.CylinderGeometry(0.04, 0.04, 0.3, 24),
+    brass,
   );
   axle.rotation.x = Math.PI / 2;
-  axle.position.set(0, 0.55, -0.17);
+  axle.position.set(0, 0.55, -0.02);
   group.add(axle);
 
   const l1 = 1.16,
     l2 = 1.08;
-  const rodGeometry = new THREE.CylinderGeometry(0.026, 0.026, 1, 16);
+  // Machined flat arms (unit length along y; posed and stretched each frame).
+  const rodGeometry = new RoundedBoxGeometry(0.075, 1, 0.032, 3, 0.014);
   const rod1 = new THREE.Mesh(rodGeometry, brass),
     rod2 = new THREE.Mesh(rodGeometry.clone(), brass);
   group.add(rod1, rod2);
-  const bob1 = new THREE.Mesh(new THREE.SphereGeometry(0.125, 32, 20), brass);
-  const bob2 = new THREE.Mesh(new THREE.SphereGeometry(0.155, 32, 20), copper);
+  const bob1 = new THREE.Mesh(new THREE.SphereGeometry(0.125, 48, 32), brass);
+  const bob2 = new THREE.Mesh(new THREE.SphereGeometry(0.155, 48, 32), copper);
   group.add(bob1, bob2);
   const jointRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.14, 0.018, 10, 32),
+    new THREE.TorusGeometry(0.135, 0.016, 16, 48),
     black,
   );
   group.add(jointRing);
@@ -188,10 +241,10 @@ export function createKineticPendulum({ model, materials, palette }) {
   function setPalette(p) {
     copper.color.set(
       p?.name === "보랏빛 꿈"
-        ? 0xa4a5a0
+        ? 0xc4c6c8
         : p?.name === "햇살과 꿀"
-          ? 0xc1a365
-          : 0xae7960,
+          ? 0xdcbc7c
+          : 0xc98a6b,
     );
   }
   setPalette(palette);

@@ -6,7 +6,6 @@ import { createKineticPendulum } from "./kinetic-pendulum.js";
 import { ConvectionSystem } from "./fluid-dynamics.js";
 import { createStudio } from "./studio.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
-import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 
 const $ = (s) => document.querySelector(s);
 const stage = $("#stage");
@@ -53,9 +52,33 @@ const toys = [
     hint: "작은 힘으로, 다른 움직임",
   },
 ];
+// Per-object camera height (radians above the horizon) and lighting look.
+const views = [
+  { elevation: 0.07, look: { key: 380, wash: 240, rim: 200 } },
+  { elevation: 0.08, look: { key: 260, wash: 170, rim: 150, exposure: 1.0 } },
+  { elevation: 0.09, look: { key: 380, wash: 240, rim: 190 } },
+  {
+    elevation: 0.62,
+    look: { key: 340, wash: 220, rim: 120, rake: 0.55, reflection: 0.7 },
+  },
+  {
+    elevation: 0.66,
+    look: {
+      key: 110,
+      wash: 200,
+      rim: 60,
+      rake: 1.9,
+      rakePosition: [-8, 1.7, -1.2],
+      reflection: 0.6,
+      exposure: 0.95,
+    },
+  },
+  { elevation: 0.05, look: { key: 420, wash: 260, rim: 220 } },
+];
+
 let studio;
 try {
-  studio = createStudio(stage, palettes[0]);
+  studio = createStudio(stage);
 } catch (error) {
   $("#loading").hidden = true;
   $("#webgl-error").hidden = false;
@@ -63,36 +86,37 @@ try {
 }
 const {
   renderer,
-  scene,
   camera,
   anchor,
-  mirror,
-  contact,
   glass,
   glassEdge,
   metal,
   darkMetal,
+  brass,
   oilA,
   oilB,
-  glowA,
-  glowB,
 } = studio;
+studio.tintLiquid(oilA, palettes[0].a);
+studio.tintLiquid(oilB, palettes[0].b);
+
+// The flip of the cascade lifts the vessel off the floor; the lift lives on
+// this group so the model itself keeps rotating around its own centre.
+const lift = new THREE.Group();
+anchor.add(lift);
 let model = new THREE.Group();
-anchor.add(model);
+lift.add(model);
 const sharedMaterials = new Set([
   glass,
   glassEdge,
   metal,
   darkMetal,
+  brass,
   oilA,
   oilB,
-  glowA,
-  glowB,
 ]);
 const sphereGeo = new THREE.SphereGeometry(1, 48, 32);
 let dynamic = [],
-  fluid = null,
-  fluid2 = null,
+  liquid = null,
   toyIndex = 2,
   paletteIndex = 0;
 let simTime = 10,
@@ -101,17 +125,19 @@ let simTime = 10,
   energy = 0,
   flipTarget = 0,
   flipAngle = 0;
-let yaw = -0.11,
-  pitch = 0.015,
-  targetYaw = -0.11,
-  targetPitch = 0.015,
+let yaw = -0.28,
+  pitch = 0,
+  targetYaw = -0.28,
+  targetPitch = 0,
   zoom = 1,
   frame = 0;
 let activeSimulation = null,
   cascadeSimulation = null,
   convection = null,
-  modelMinY = -2.3;
+  lampLight = null,
+  lampGlow = null;
 const modelBounds = new THREE.Box3();
+const frameBox = new THREE.Box3();
 let orbitDrift = {
   phase: 0,
   radius: 0.13,
@@ -122,16 +148,17 @@ let orbitDrift = {
 };
 let fluidDirty = true,
   lastFluidTime = -1,
-  ownedLights = [],
-  orbitRing = null;
+  orbitRing = null,
+  contactShadow = null;
+
+// --------------------------------------------------------------- helpers
 function mesh(geo, mat, parent = model) {
   const m = new THREE.Mesh(geo, mat);
   parent.add(m);
-  m.castShadow = mat.transmission !== 1;
   return m;
 }
 function box(w, h, d, r, mat, parent = model) {
-  return mesh(new RoundedBoxGeometry(w, h, d, 5, r), mat, parent);
+  return mesh(new RoundedBoxGeometry(w, h, d, 6, r), mat, parent);
 }
 function sphere(r, mat, parent = model) {
   const m = mesh(sphereGeo, mat, parent);
@@ -139,184 +166,282 @@ function sphere(r, mat, parent = model) {
   return m;
 }
 function ring(r, t, y, mat, parent = model) {
-  const m = mesh(new THREE.TorusGeometry(r, t, 12, 80), mat, parent);
+  const m = mesh(new THREE.TorusGeometry(r, t, 16, 128), mat, parent);
   m.rotation.x = Math.PI / 2;
   m.position.y = y;
   return m;
 }
-function roundOutline(w, h, r, z, mat, t = 0.027) {
-  const pts = [];
-  for (let i = 0; i < 4; i++) {
-    const cx = (i === 0 || i === 3 ? 1 : -1) * (w / 2 - r),
-      cy = (i < 2 ? 1 : -1) * (h / 2 - r);
-    for (let j = 0; j <= 12; j++) {
-      const angle = (i * 0.5 + (j / 12) * 0.5) * Math.PI;
-      pts.push(
-        new THREE.Vector3(
-          cx + r * Math.cos(angle),
-          cy + r * Math.sin(angle),
-          z,
-        ),
-      );
-    }
-  }
-  const c = new THREE.CatmullRomCurve3(pts, true);
-  return mesh(new THREE.TubeGeometry(c, 128, t, 8, true), mat);
+function lathe(points, mat, segments = 128) {
+  return mesh(
+    new THREE.LatheGeometry(
+      points.map((p) => new THREE.Vector2(...p)),
+      segments,
+    ),
+    mat,
+  );
 }
+/** Smooth a coarse lathe profile with a Catmull-Rom pass. */
+function smoothProfile(points, samples = 8) {
+  const curve = new THREE.SplineCurve(
+    points.map((p) => new THREE.Vector2(...p)),
+  );
+  return curve.getPoints(points.length * samples).map((p) => [p.x, p.y]);
+}
+let contactTexture;
+function contactTextureOnce() {
+  if (contactTexture) return contactTexture;
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, "rgba(0,0,0,0.85)");
+  grad.addColorStop(0.45, "rgba(0,0,0,0.45)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  contactTexture = new THREE.CanvasTexture(c);
+  return contactTexture;
+}
+/** A soft ambient-occlusion pad where the object meets the floor. */
+function addContact(w, d) {
+  contactShadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      map: contactTextureOnce(),
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+  contactShadow.rotation.x = -Math.PI / 2;
+  contactShadow.scale.set(w, d, 1);
+  contactShadow.renderOrder = -1;
+  anchor.add(contactShadow);
+}
+
 function clearModel() {
   activeSimulation?.dispose?.();
   activeSimulation = null;
   cascadeSimulation = null;
   convection = null;
-  anchor.remove(model);
+  lampLight = null;
+  lampGlow = null;
+  lift.remove(model);
   const geometries = new Set(),
     materials = new Set();
-  model.traverse((o) => {
+  const collect = (o) => {
     if (o.geometry && o.geometry !== sphereGeo) geometries.add(o.geometry);
     if (o.material && !sharedMaterials.has(o.material))
       materials.add(o.material);
-  });
+  };
+  model.traverse(collect);
+  if (contactShadow) {
+    anchor.remove(contactShadow);
+    collect(contactShadow);
+    contactShadow = null;
+  }
   geometries.forEach((g) => g.dispose());
   materials.forEach((m) => m.dispose());
   model = new THREE.Group();
-  anchor.add(model);
+  lift.add(model);
+  lift.position.set(0, 0, 0);
   dynamic = [];
-  fluid = null;
-  fluid2 = null;
+  liquid?.dispose();
+  liquid = null;
   orbitRing = null;
-  ownedLights = [];
   flipAngle = flipTarget = 0;
   energy = 0;
   fluidDirty = true;
 }
+
+// ------------------------------------------------------- 01 oil cascade
 function createCascade() {
   const body = box(2.64, 5.64, 0.78, 0.29, glass);
   body.renderOrder = 8;
-  roundOutline(2.61, 5.6, 0.29, 0.39, glassEdge, 0.034);
-  roundOutline(2.61, 5.6, 0.29, -0.39, glassEdge, 0.024);
-  for (const y of [-2.48, 2.48]) {
-    const cap = box(2.62, 0.64, 0.83, 0.1, darkMetal);
+  for (const y of [-2.5, 2.5]) {
+    const cap = box(2.78, 0.62, 0.92, 0.16, darkMetal);
     cap.position.y = y;
+    const band = box(2.8, 0.035, 0.94, 0.016, brass);
+    band.position.y = y - Math.sign(y) * 0.28;
   }
-  const rampMaterial = new THREE.MeshStandardMaterial({
-    color: "#69797b",
-    metalness: 0.6,
+  const shelf = new THREE.MeshPhysicalMaterial({
+    color: "#c9d0d2",
+    metalness: 1,
     roughness: 0.28,
   });
-  // Six thin, visible baffles. Opaque baffles also remain in the glass refraction pass.
   for (let i = 0; i < 6; i++) {
     const side = i % 2 === 0 ? 1 : -1,
       y = 1.52 - i * 0.6;
-    const ramp = box(1.92, 0.045, 0.47, 0.02, rampMaterial);
+    const ramp = box(1.92, 0.04, 0.5, 0.018, shelf);
     ramp.position.set(-side * 0.19, y, 0);
     ramp.rotation.z = -side * 0.2;
-    const rail = mesh(
-      new THREE.CylinderGeometry(0.013, 0.013, 1.95, 10),
-      rampMaterial,
-    );
-    rail.rotation.z = Math.PI / 2 - side * 0.2;
-    rail.position.set(-side * 0.19, y + 0.018, 0.255);
+    // A small lip at the low end where the drops gather before falling.
+    const lip = mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.5, 12), shelf);
+    lip.rotation.x = Math.PI / 2;
+    lip.position.set(-side * 0.19 + side * 0.94 * Math.cos(0.2), y - 0.94 * Math.sin(0.2) + 0.02, 0);
   }
-  // Clear upper feeder cups and saturated liquid reservoirs.
+  // Oil drops, the upper reservoirs and the collected pools are one
+  // raymarched liquid: drops that touch merge, everything refracts.
   for (let i = 0; i < 2; i++) {
-    const x = i ? 0.57 : -0.57,
-      mat = i ? oilB : oilA;
-    const cup = box(1.11, 0.58, 0.59, 0.18, glassEdge);
-    cup.position.set(x, 2.27, 0);
-    const pond = sphere(0.49, mat);
-    pond.position.set(x, 2.2, 0);
-    pond.scale.set(0.48, 0.11, 0.25);
-    const meniscus = ring(0.43, 0.015, 2.23, mat);
-    meniscus.position.x = x;
-    meniscus.scale.set(1, 0.59, 1);
-    const neck = sphere(0.06, mat);
-    neck.position.set(x, 2.02, 0);
-    neck.scale.set(0.065, 0.18, 0.064);
-    dynamic.push({ kind: "neck", mesh: neck, i });
-    const pool = sphere(0.51, mat);
-    pool.position.set(x, -2.42, 0);
-    pool.scale.set(0.61, 0.145, 0.27);
-    dynamic.push({ kind: "pool", mesh: pool, i });
+    const x = i ? 0.57 : -0.57;
+    dynamic.push({ kind: "pond", x, y: 2.08, i });
+    dynamic.push({ kind: "pool", x, y: -2.12, i });
   }
   for (let i = 0; i < 32; i++) {
-    const m = sphere(0.12, i % 2 ? glowB : glowA);
+    const holder = new THREE.Object3D();
+    model.add(holder);
     dynamic.push({
       kind: "drop",
-      mesh: m,
+      mesh: holder,
       i,
       r: 0.075 + (Math.sin(i * 31.7) * 0.5 + 0.5) * 0.07,
       offset: i * 0.947,
     });
   }
+  liquid = studio.makeRaymarchedLiquid({
+    geometry: new THREE.BoxGeometry(2.36, 5.0, 0.62),
+    smooth: 0.07,
+    ior: 1.45,
+  });
+  model.add(liquid.mesh);
+  setLiquidColours();
 }
-function lathe(points, mat) {
-  return mesh(
-    new THREE.LatheGeometry(
-      points.map((p) => new THREE.Vector2(...p)),
-      96,
-    ),
-    mat,
-  );
+function updateCascadeLiquid() {
+  liquid.reset();
+  for (const d of dynamic) {
+    if (d.kind === "pond")
+      liquid.add(d.x, d.y, 0, 0.49, d.i, 0.5, 0.1, 0.26);
+    else if (d.kind === "pool")
+      liquid.add(d.x, d.y, 0, 0.51, d.i, 0.58, 0.1, 0.27);
+  }
+  for (const d of dynamic) {
+    if (d.kind !== "drop") continue;
+    const m = d.mesh;
+    liquid.add(
+      m.position.x,
+      m.position.y,
+      m.position.z,
+      1,
+      d.i % 2,
+      m.scale.x,
+      m.scale.y,
+      m.scale.z,
+    );
+  }
+  liquid.commit();
+}
+
+// ----------------------------------------------------------- 02 lava lamp
+function lampRadius(y) {
+  const pts = [
+    [-1.84, 0.5],
+    [-1.66, 0.6],
+    [-0.98, 0.73],
+    [0.12, 0.74],
+    [1.2, 0.63],
+    [1.94, 0.44],
+  ];
+  if (y <= pts[0][0]) return pts[0][1];
+  for (let i = 0; i < pts.length - 1; i++)
+    if (y <= pts[i + 1][0])
+      return THREE.MathUtils.lerp(
+        pts[i][1],
+        pts[i + 1][1],
+        (y - pts[i][0]) / (pts[i + 1][0] - pts[i][0]),
+      );
+  return pts[pts.length - 1][1];
 }
 function createLava() {
   convection = new ConvectionSystem(6);
+  const p = palettes[paletteIndex];
+  // Base: a tapered satin shell with a brass seam.
   lathe(
-    [
+    smoothProfile([
       [0, -2.8],
-      [0.81, -2.8],
-      [0.88, -2.7],
-      [0.81, -2.57],
-      [0.52, -1.88],
-      [0.54, -1.75],
-      [0, -1.75],
-    ],
-    metal,
-  );
-  ring(0.82, 0.025, -2.72, glassEdge);
-  ring(0.53, 0.033, -1.79, metal);
-  const vessel = lathe(
-    [
+      [0.8, -2.8],
+      [0.86, -2.74],
+      [0.83, -2.6],
+      [0.62, -2.0],
+      [0.55, -1.86],
+      [0.56, -1.78],
       [0, -1.78],
-      [0.5, -1.78],
-      [0.62, -1.64],
-      [0.78, -0.93],
-      [0.76, 0.35],
-      [0.62, 1.51],
-      [0.39, 2.24],
-      [0.35, 2.36],
-      [0, 2.36],
-    ],
+    ]),
+    darkMetal,
+  );
+  ring(0.83, 0.018, -2.66, brass);
+  ring(0.565, 0.02, -1.8, brass);
+  const vessel = lathe(
+    smoothProfile([
+      [0, -1.8],
+      [0.52, -1.8],
+      [0.62, -1.6],
+      [0.76, -0.9],
+      [0.77, 0.2],
+      [0.66, 1.3],
+      [0.46, 2.05],
+      [0.38, 2.3],
+      [0, 2.3],
+    ]),
     glass,
   );
   vessel.renderOrder = 9;
   lathe(
-    [
-      [0, 2.24],
-      [0.37, 2.24],
-      [0.4, 2.35],
-      [0.33, 2.68],
-      [0.29, 2.74],
-      [0, 2.74],
+    smoothProfile([
+      [0, 2.22],
+      [0.39, 2.22],
+      [0.41, 2.32],
+      [0.33, 2.66],
+      [0.28, 2.76],
+      [0, 2.76],
+    ]),
+    darkMetal,
+  );
+  ring(0.4, 0.016, 2.3, brass);
+  // A glowing heating coil seen through the wax pool.
+  lampGlow = mesh(
+    new THREE.CylinderGeometry(0.42, 0.4, 0.04, 64),
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(p.b).multiplyScalar(2.2),
+    }),
+  );
+  lampGlow.position.y = -1.77;
+  // Wax: a raymarched, strongly scattering body heated from below.
+  liquid = studio.makeRaymarchedLiquid({
+    geometry: new THREE.LatheGeometry(
+      smoothProfile([
+        [0.001, -1.84],
+        [0.5, -1.84],
+        [0.6, -1.66],
+        [0.74, -0.98],
+        [0.75, 0.12],
+        [0.64, 1.2],
+        [0.45, 1.94],
+        [0.001, 1.94],
+      ]).map((q) => new THREE.Vector2(...q)),
+      64,
+    ),
+    smooth: 0.32,
+    ior: 1.45,
+    wax: true,
+    heatRange: [-1.6, 1.4],
+    // Inner radius by height (proxy space), for the glowing liquid.
+    profile: [
+      [-1.84, 0.5],
+      [-1.66, 0.6],
+      [-0.98, 0.73],
+      [0.12, 0.74],
+      [1.2, 0.63],
+      [1.94, 0.44],
     ],
-    metal,
-  );
-  ring(0.37, 0.024, 2.34, glassEdge);
-  const baseGlow = mesh(
-    new THREE.CylinderGeometry(0.46, 0.43, 0.06, 64),
-    new THREE.MeshBasicMaterial({ color: palettes[paletteIndex].b }),
-  );
-  baseGlow.position.y = -1.76;
-  fluid = new MarchingCubes(48, glowB, false, false, 24000);
-  fluid.isolation = 65;
-  fluid.scale.set(1.27, 2.75, 1.27);
-  fluid.position.y = 0.1;
-  model.add(fluid);
-  const light = new THREE.PointLight(palettes[paletteIndex].b, 1.8, 4);
-  light.position.y = -1.35;
-  model.add(light);
-  ownedLights.push(light);
-  ownedLights.push(baseGlow.material);
+  });
+    model.add(liquid.mesh);
+  setLiquidColours();
+  lampLight = new THREE.PointLight(p.b, 9, 7, 2);
+  lampLight.position.y = -1.1;
+  model.add(lampLight);
 }
+
+// --------------------------------------------------------- 03 liquid orbit
 function createOrbit() {
   orbitDrift = {
     phase: 0,
@@ -328,35 +453,45 @@ function createOrbit() {
   };
   const globe = sphere(2.02, glass);
   globe.renderOrder = 9;
-  const stand = mesh(
-    new THREE.CylinderGeometry(2.08, 2.13, 0.23, 96),
+  // A turned pedestal: a low disc with a cup that cradles the globe.
+  lathe(
+    smoothProfile([
+      [0, -2.42],
+      [1.55, -2.42],
+      [1.62, -2.36],
+      [1.6, -2.24],
+      [1.4, -2.16],
+      [0.82, -2.08],
+      [0.7, -1.98],
+      [0.66, -1.9],
+      [0, -1.9],
+    ]),
     darkMetal,
   );
-  stand.position.y = -2.17;
-  ring(2.09, 0.013, -2.06, metal);
-  const seat = mesh(new THREE.CylinderGeometry(0.48, 0.65, 0.15, 64), metal);
-  seat.position.y = -1.98;
-  orbitRing = mesh(new THREE.TorusGeometry(2.31, 0.027, 16, 180), metal);
+  ring(1.58, 0.012, -2.25, brass);
+  ring(0.68, 0.016, -1.93, brass);
+  orbitRing = mesh(new THREE.TorusGeometry(2.36, 0.022, 20, 220), metal);
   orbitRing.rotation.set(1.12, 0.24, -0.42);
-  fluid = new MarchingCubes(52, oilA, false, false, 26000);
-  fluid.isolation = 65;
-  fluid.scale.setScalar(2.1);
-  model.add(fluid);
-  fluid2 = new MarchingCubes(48, oilB, false, false, 22000);
-  fluid2.isolation = 65;
-  fluid2.scale.setScalar(2.1);
-  model.add(fluid2);
-  for (let i = 0; i < 12; i++) {
-    let m = sphere(0.022 + (i % 4) * 0.018, glassEdge);
+  liquid = studio.makeRaymarchedLiquid({
+    geometry: new THREE.SphereGeometry(1.96, 48, 32),
+    smooth: 0.34,
+    ior: 1.42,
+  });
+  model.add(liquid.mesh);
+  setLiquidColours();
+  for (let i = 0; i < 14; i++) {
+    const m = sphere(0.02 + (i % 4) * 0.014, glassEdge);
     dynamic.push({ kind: "orbitPearl", mesh: m, i });
   }
 }
+
 function makeToy(index) {
   clearModel();
   const options = {
     model,
-    materials: { metal, darkMetal, glassEdge },
+    materials: { metal, darkMetal, glassEdge, brass },
     palette: palettes[paletteIndex],
+    env: studio.environmentTarget.texture,
   };
   if (index === 0) {
     createCascade();
@@ -373,7 +508,7 @@ function makeToy(index) {
   modelBounds.makeEmpty();
   const inverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
   model.traverse((o) => {
-    if (o.geometry) {
+    if (o.geometry && o.visible && !o.isMarchingCubes) {
       o.geometry.computeBoundingBox();
       const b = o.geometry.boundingBox.clone();
       b.applyMatrix4(
@@ -382,39 +517,71 @@ function makeToy(index) {
       modelBounds.union(b);
     }
   });
-  // The pendulum can swing beyond the frame's initial static bounds.
+  // The model rests on the floor (y = 0 in anchor space).
+  model.position.y = -modelBounds.min.y;
+  const height = modelBounds.max.y - modelBounds.min.y;
+  const halfW = Math.max(-modelBounds.min.x, modelBounds.max.x);
+  const halfD = Math.max(-modelBounds.min.z, modelBounds.max.z);
+  frameBox.min.set(-halfW, 0, -halfD);
+  frameBox.max.set(halfW, height, halfD);
   if (index === 5) {
-    modelBounds.min.x = -2.55;
-    modelBounds.max.x = 2.55;
+    // The pendulum swings beyond its frame; reserve that space.
+    frameBox.min.x = Math.min(frameBox.min.x, -2.3);
+    frameBox.max.x = Math.max(frameBox.max.x, 2.3);
   }
-  modelMinY = modelBounds.min.y;
+  addContact(halfW * 2.3, Math.max(halfD * 2.6, 1.4));
   studio.setModel(model);
+  studio.setLook(views[index].look);
   model.traverse((o) => {
-    if (o.isMesh) {
-      o.castShadow = !o.material.transmission;
-      o.receiveShadow = !o.material.transmission;
+    if (!o.isMesh) return;
+    if (o.userData.liquid) {
+      o.castShadow = o.receiveShadow = false;
+      return;
     }
+    const transmissive = o.material.transmission > 0.5;
+    o.castShadow = !transmissive || o.material === oilA || o.material === oilB;
+    o.receiveShadow = !transmissive;
   });
 }
 makeToy(2);
 
+// ------------------------------------------------------------ simulation
 function updateToy(t, dt) {
   if (activeSimulation) {
-    // Modules use accumulated state; fixed substeps preserve speed and pause semantics.
     const steps = Math.max(1, Math.ceil(dt / 0.025));
     for (let i = 0; i < steps; i++) activeSimulation.update(t, dt / steps, 0);
   } else if (toyIndex === 0) {
     const steps = Math.max(1, Math.ceil(dt / 0.025));
     for (let i = 0; i < steps; i++)
       cascadeSimulation.step(dt / steps, flipAngle);
+    updateCascadeLiquid();
   } else if (toyIndex === 1) {
     convection.step(dt, 0);
     if (fluidDirty || (dt > 0 && frame % 2 === 0)) {
-      fluid.reset();
-      for (const n of convection.nodes)
-        fluid.addBall(n.x, n.y, n.z, n.strength, 12);
-      fluid.addBall(0.5, 0.18, 0.5, 0.42, 12);
-      fluid.update();
+      liquid.reset();
+      for (const n of convection.nodes) {
+        // The convection runs in a narrow normalized column; spread it across
+        // the lamp's real width. Proxy space: y spans -1.825..1.825.
+        const y = (n.y - 0.5) * 2 * 2.75 + 0.1;
+        const r = 0.13 + n.strength * 0.66;
+        // Keep each blob inside the tapering glass.
+        const inner = Math.max(0.05, lampRadius(y) - r * 0.9);
+        let x = (n.x - 0.5) * 2 * 2.2 * 1.5,
+          z = (n.z - 0.5) * 2 * 2.2 * 1.5;
+        const radial = Math.hypot(x, z);
+        if (radial > inner) {
+          x *= inner / radial;
+          z *= inner / radial;
+        }
+        // Rising and sinking wax stretches along its motion.
+        const stretch = 1 + Math.min(0.55, Math.abs(n.vy) * 34);
+        const squeeze = 1 / Math.sqrt(stretch);
+        liquid.add(x, y, z, r, 0, squeeze, stretch, squeeze);
+      }
+      // The pool of wax resting on the heater.
+      liquid.add(0, -1.8, 0, 0.62, 0, 0.9, 0.32, 0.9);
+      liquid.add(-0.12, -1.62, 0.08, 0.2, 0);
+      liquid.commit();
       lastFluidTime = t;
     }
   } else if (toyIndex === 2) {
@@ -440,61 +607,93 @@ function updateToy(t, dt) {
         dt * (0.035 + orbitDrift.radius * 0.2 + energy * 0.04);
     }
     if (fluidDirty || (t !== lastFluidTime && frame % 2 === 0)) {
-      fluid.reset();
-      fluid2.reset();
-      // Two cohesive, rounded streams. A slow helical drift preserves surface tension;
-      // the impulse adds damped lateral displacement, rather than teleporting droplets.
-      for (let i = 0; i < 8; i++) {
-        const f = i / 7,
-          y = 0.23 + f * 0.54 + Math.sin(f * Math.PI) * orbitDrift.tilt,
-          a = f * Math.PI * 1.65 + orbitDrift.phase;
+      liquid.reset();
+      // Two cohesive liquids winding around each other: lobes joined by
+      // thinner necks, so each colour reads as one viscous body.
+      const n = 15,
+        S = 4.2;
+      for (let i = 0; i < n; i++) {
+        const f = i / (n - 1),
+          y = 0.25 + f * 0.5 + Math.sin(f * Math.PI) * orbitDrift.tilt,
+          a = f * Math.PI * 1.45 + orbitDrift.phase;
         const radius =
-          orbitDrift.radius + 0.02 * Math.sin(f * 4 + orbitDrift.tilt * 7);
+          orbitDrift.radius * 1.2 + 0.03 * Math.sin(f * 4 + orbitDrift.tilt * 7);
         const wobble = Math.sin(t * 1.7 + f * 5) * energy * 0.009;
-        fluid.addBall(
-          0.5 + Math.sin(a) * radius + wobble,
-          y,
-          0.5 + Math.cos(a) * 0.12,
-          0.55 + 0.22 * Math.sin(f * Math.PI),
-          12,
+        const lobeA = Math.pow(
+          Math.max(0, Math.sin(f * Math.PI * 2 + 0.5 + t * 0.05)),
+          2,
         );
-        fluid2.addBall(
-          0.5 - Math.sin(a) * radius - wobble,
-          y,
-          0.5 - Math.cos(a) * 0.12,
-          0.51 + 0.2 * Math.sin(f * Math.PI),
-          12,
+        const lobeB = Math.pow(
+          Math.max(0, Math.sin(f * Math.PI * 2 + 2.1 - t * 0.04)),
+          2,
+        );
+        const taper = 0.55 + 0.45 * Math.sin(f * Math.PI);
+        liquid.add(
+          (Math.sin(a) * radius + wobble) * S,
+          (y - 0.5) * S,
+          Math.cos(a) * 0.12 * S,
+          (0.2 + 0.26 * lobeA) * taper,
+          0,
+        );
+        liquid.add(
+          (-Math.sin(a) * radius - wobble) * S,
+          (y - 0.5) * S,
+          -Math.cos(a) * 0.12 * S,
+          (0.2 + 0.24 * lobeB) * taper,
+          1,
         );
       }
-      fluid.update();
-      fluid2.update();
+      // A few satellite droplets that drift away and rejoin.
+      for (let k = 0; k < 3; k++) {
+        const a = orbitDrift.phase * (1.3 + k * 0.2) + k * 2.1;
+        const r = 0.27 + 0.03 * Math.sin(t * 0.21 + k);
+        liquid.add(
+          Math.cos(a) * r * S,
+          Math.sin(a * 0.7 + k) * 0.22 * S,
+          Math.sin(a) * r * 0.55 * S,
+          0.1,
+          k % 2,
+        );
+      }
+      liquid.commit();
       fluidDirty = false;
       lastFluidTime = t;
     }
     for (const d of dynamic) {
       const a = t * 0.055 + d.i * 2.36,
-        r = 1.4 + 0.1 * Math.sin(d.i * 3.72);
+        r = 1.35 + 0.12 * Math.sin(d.i * 3.72);
       d.mesh.position.set(
         Math.cos(a) * r,
-        Math.sin(a) * r * 0.88,
-        Math.sin(a * 0.63 + d.i) * 0.6,
+        Math.sin(a) * r * 0.86,
+        Math.sin(a * 0.63 + d.i) * 0.62,
       );
     }
   }
 }
 
+function setLiquidColours() {
+  if (!liquid) return;
+  const p = palettes[paletteIndex];
+  if (toyIndex === 1) {
+    liquid.setLiquid(0, p.b, { density: 4.5, scatter: 2.1 });
+    const medium = new THREE.Color(p.a).lerp(new THREE.Color(p.b), 0.35);
+    liquid.setMedium(medium, 0.2);
+  } else if (toyIndex === 0) {
+    liquid.setLiquid(0, p.a, { density: 3.2, scatter: 0.22 });
+    liquid.setLiquid(1, p.b, { density: 3.2, scatter: 0.22 });
+  } else {
+    liquid.setLiquid(0, p.a, { density: 1.9, scatter: 0.16 });
+    liquid.setLiquid(1, p.b, { density: 1.9, scatter: 0.16 });
+  }
+}
 function applyPalette(index) {
   paletteIndex = index;
   const p = palettes[index];
-  oilA.color.set(p.a);
-  oilB.color.set(p.b);
-  oilA.color.lerp(new THREE.Color(0xffffff), 0.08);
-  oilB.color.lerp(new THREE.Color(0xffffff), 0.08);
-  oilA.attenuationColor.set(p.a);
-  oilB.attenuationColor.set(p.b);
-  glowA.color.set(p.a);
-  glowB.color.set(p.b);
-  ownedLights.forEach((o) => o.color.set(p.b));
+  studio.tintLiquid(oilA, p.a);
+  studio.tintLiquid(oilB, p.b);
+  setLiquidColours();
+  lampLight?.color.set(p.b);
+  lampGlow?.material.color.set(p.b).multiplyScalar(2.2);
   document.querySelectorAll(".swatch").forEach((b, i) => {
     b.classList.toggle("active", i === index);
     b.setAttribute("aria-pressed", i === index);
@@ -507,8 +706,8 @@ function setToy(index) {
   if (index === toyIndex) return;
   toyIndex = index;
   simTime = 10;
-  targetYaw = -0.11;
-  targetPitch = index === 3 || index === 4 ? 0 : 0.015;
+  targetYaw = yaw = index === 5 || index === 0 ? -0.18 : -0.28;
+  targetPitch = pitch = 0;
   zoom = 1;
   makeToy(index);
   qualityAdjusted = false;
@@ -619,6 +818,13 @@ window.addEventListener("keydown", (e) => {
   )
     setToy(+e.code.slice(-1) - 1);
 });
+const PITCH_MIN = -0.06,
+  PITCH_MAX = 0.42;
+function homeView() {
+  targetYaw = toyIndex === 5 || toyIndex === 0 ? -0.18 : -0.28;
+  targetPitch = 0;
+  zoom = 1;
+}
 stage.addEventListener("keydown", (e) => {
   if (
     [
@@ -637,19 +843,15 @@ stage.addEventListener("keydown", (e) => {
     fluidDirty = true;
     if (e.code === "ArrowLeft") targetYaw -= 0.15;
     if (e.code === "ArrowRight") targetYaw += 0.15;
-    if (e.code === "ArrowUp") targetPitch = Math.max(-0.24, targetPitch - 0.06);
+    if (e.code === "ArrowUp")
+      targetPitch = Math.min(PITCH_MAX, targetPitch + 0.06);
     if (e.code === "ArrowDown")
-      targetPitch = Math.min(0.24, targetPitch + 0.06);
+      targetPitch = Math.max(PITCH_MIN, targetPitch - 0.06);
     if (["Equal", "NumpadAdd"].includes(e.code))
-      zoom = Math.max(0.86, zoom - 0.04);
+      zoom = Math.max(0.82, zoom - 0.04);
     if (["Minus", "NumpadSubtract"].includes(e.code))
-      zoom = Math.min(1.18, zoom + 0.04);
-    if (e.code === "Home") {
-      targetYaw = -0.11;
-      targetPitch = 0.015;
-      zoom = 1;
-    }
-    resize();
+      zoom = Math.min(1.25, zoom + 0.04);
+    if (e.code === "Home") homeView();
   }
 });
 let pointer = null;
@@ -662,89 +864,112 @@ stage.addEventListener("pointermove", (e) => {
   fluidDirty = true;
   targetYaw += (e.clientX - pointer.x) * 0.007;
   targetPitch += (e.clientY - pointer.y) * 0.003;
-  targetPitch = THREE.MathUtils.clamp(targetPitch, -0.24, 0.24);
+  targetPitch = THREE.MathUtils.clamp(targetPitch, PITCH_MIN, PITCH_MAX);
   pointer.x = e.clientX;
   pointer.y = e.clientY;
 });
 stage.addEventListener("pointerup", () => (pointer = null));
 stage.addEventListener("pointercancel", () => (pointer = null));
 stage.addEventListener("dblclick", () => {
-  targetYaw = -0.11;
-  targetPitch = 0.015;
-  zoom = 1;
-  resize();
+  homeView();
   toast("처음 시점으로 돌아왔어요");
 });
 stage.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    zoom = THREE.MathUtils.clamp(zoom + e.deltaY * 0.00025, 0.86, 1.18);
-    resize();
+    fluidDirty = true;
+    zoom = THREE.MathUtils.clamp(zoom + e.deltaY * 0.00025, 0.82, 1.25);
   },
   { passive: false },
 );
+
+// ----------------------------------------------------------------- layout
+// The object is framed inside the space the interface actually leaves free.
+const layoutRect = { x: 0, y: 0, w: 1, h: 1 };
+function measureLayout() {
+  const w = stage.clientWidth,
+    h = stage.clientHeight;
+  const immersed = document.body.classList.contains("immersive");
+  if (immersed) {
+    Object.assign(layoutRect, {
+      x: w * 0.12,
+      y: h * 0.09,
+      w: w * 0.76,
+      h: h * 0.8,
+    });
+    return;
+  }
+  const box = (s) => $(s).getBoundingClientRect();
+  const header = box("header"),
+    intro = box(".intro"),
+    transport = box(".transport");
+  const transportCenter = (transport.left + transport.right) / 2;
+  const sideBySide = intro.right < w * 0.6 && w > 700;
+  if (sideBySide) {
+    const left = intro.right + 36,
+      right = w - Math.max(64, w * 0.055);
+    const half = Math.max(
+      80,
+      Math.min(transportCenter - left, right - transportCenter),
+    );
+    const top = header.bottom + 18,
+      bottom = transport.top - 22;
+    Object.assign(layoutRect, {
+      x: transportCenter - half,
+      y: top,
+      w: half * 2,
+      h: Math.max(80, bottom - top),
+    });
+  } else {
+    const top = intro.bottom + 6,
+      bottom = transport.top - 10;
+    Object.assign(layoutRect, {
+      x: 14,
+      y: top,
+      w: w - 28,
+      h: Math.max(80, bottom - top),
+    });
+  }
+}
+function frameView() {
+  const w = stage.clientWidth,
+    h = stage.clientHeight;
+  studio.frame(
+    frameBox,
+    layoutRect,
+    w,
+    h,
+    views[toyIndex].elevation + pitch,
+    zoom,
+  );
+}
 function resize() {
   fluidDirty = true;
   const w = stage.clientWidth,
-    h = stage.clientHeight,
-    mobile = w <= 700,
-    landscape = h < 500 && w > h;
+    h = stage.clientHeight;
   renderer.setSize(w, h);
-  camera.aspect = w / h;
-  const trayView = toyIndex === 3 || toyIndex === 4;
-  camera.position.set(
-    0,
-    trayView ? 7 * zoom : 0.25,
-    trayView ? 14 * zoom : 15 * zoom,
-  );
-  camera.lookAt(0, 0, 0);
-  camera.updateProjectionMatrix();
-  const immersed = document.body.classList.contains("immersive");
-  const worldHeight =
-    (2 * Math.tan(THREE.MathUtils.degToRad(16)) * camera.position.length()) /
-    zoom;
-  const bottom = landscape ? 150 : mobile ? 174 : Math.min(190, h * 0.24),
-    top = landscape ? 65 : mobile ? (h < 700 ? 220 : 238) : 85;
-  const available = immersed ? h * 0.83 : h - top - bottom;
-  const span = Math.max(1, modelBounds.max.x - modelBounds.min.x);
-  const widthLimit = (worldHeight * (w / h) * (mobile ? 0.88 : 0.48)) / span;
-  const sc = Math.min(
-    widthLimit,
-    toyIndex === 3 || toyIndex === 4 ? 1.7 : 1.35,
-    Math.max(
-      0.25,
-      ((available / h) * worldHeight) /
-        (toyIndex === 3 || toyIndex === 4 ? 4.4 : toyIndex === 2 ? 5.1 : 5.7),
-    ),
-  );
-  const centerY = immersed
-    ? h * 0.47
-    : top + available * (toyIndex === 2 ? 0.4 : 0.48);
-  const offsetX = mobile || immersed ? 0 : worldHeight * (w / h) * 0.155 * zoom;
-  anchor.scale.setScalar(sc);
-  anchor.position.set(
-    offsetX,
-    (0.5 - centerY / h) * worldHeight * zoom +
-      (toyIndex === 3 ? 0.5 : toyIndex === 4 ? 1.2 : 0) * sc,
-    0,
-  );
-  const modelFloor = modelMinY;
-  mirror.position.set(
-    anchor.position.x,
-    anchor.position.y + modelFloor * sc,
-    0,
-  );
-  contact.position.set(anchor.position.x, mirror.position.y + 0.008, 0);
-  contact.scale.setScalar(sc);
+  measureLayout();
+  frameView();
 }
 window.addEventListener("resize", resize);
 resize();
 setPaused(paused);
+
 let last = performance.now(),
   sampleStart = last,
   frames = 0,
-  qualityAdjusted = false;
+  qualityAdjusted = false,
+  lastZoom = zoom,
+  lastPitch = pitch;
+function flipLift(angle) {
+  // A turned vessel rotates about its centre and is lifted clear of the floor.
+  const h = modelBounds.max.y - modelBounds.min.y,
+    w = modelBounds.max.x - modelBounds.min.x;
+  const c = Math.abs(Math.cos(angle)),
+    s = Math.abs(Math.sin(angle));
+  return (h / 2) * c + (w / 2) * s - h / 2;
+}
 function tick(now) {
   requestAnimationFrame(tick);
   if (document.hidden) {
@@ -757,6 +982,7 @@ function tick(now) {
   const moving =
     Math.abs(yaw - targetYaw) +
       Math.abs(pitch - targetPitch) +
+      Math.abs(zoom - lastZoom) +
       (paused ? 0 : Math.abs(flipAngle - flipTarget)) >
     0.0001;
   if (paused && !moving && !fluidDirty && frame > 3) return;
@@ -768,10 +994,17 @@ function tick(now) {
   pitch = THREE.MathUtils.damp(pitch, targetPitch, 5, dt);
   if (!paused) flipAngle = THREE.MathUtils.damp(flipAngle, flipTarget, 4, dt);
   anchor.rotation.y = yaw;
-  anchor.rotation.x = pitch;
+  if (Math.abs(pitch - lastPitch) > 1e-5 || zoom !== lastZoom) {
+    frameView();
+    lastPitch = pitch;
+    lastZoom = zoom;
+  }
   // Gravity is transformed into vessel space continuously throughout the flip.
-
-  model.rotation.z = flipAngle;
+  // The vessel turns about its centre and is lifted so it clears the floor.
+  if (toyIndex === 0) {
+    model.rotation.z = flipAngle;
+    lift.position.y = flipLift(flipAngle);
+  }
   updateToy(simTime, paused ? 0 : dt * speed);
   fluidDirty = false;
   studio.render();
@@ -783,11 +1016,9 @@ function tick(now) {
   stage.dataset.geometries = String(renderer.info.memory.geometries);
   if (!paused && !qualityAdjusted && now - sampleStart > 6000) {
     const fps = (frames * 1000) / (now - sampleStart);
-    if (fps < 30) {
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
-      mirror.getRenderTarget().setSize(256, 256);
-    }
+    if (fps < 30) renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
     qualityAdjusted = true;
+    resize();
   }
   if (frame === 3) {
     $("#loading").style.opacity = 0;

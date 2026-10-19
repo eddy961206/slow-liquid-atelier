@@ -1,40 +1,64 @@
 import * as THREE from "three";
+import { stoneTextures } from "./textures.js";
 
 // A ceramic sand table with a rolling tool and permanently accumulated tracks.
-export function createSandscape({ model, materials, palette }) {
+export function createSandscape({ model, materials, palette, env }) {
   const tray = new THREE.Group();
   tray.position.set(0, -0.55, 0);
   tray.rotation.x = 0;
   model.add(tray);
 
-  const ceramic = new THREE.MeshStandardMaterial({
-    color: "#34332f",
-    roughness: 0.72,
-    metalness: 0.06,
+  // A dark speckled stoneware tray: turned lip, recessed foot.
+  const trayTex = stoneTextures({
+    size: 256,
+    base: "#2c2a27",
+    dark: "#1d1c1a",
+    light: "#3e3b37",
+    speckle: 0.9,
+    period: 6,
+    seed: 21,
+    repeat: [3, 1],
   });
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.28, 2.12, 0.26, 96),
+  const ceramic = new THREE.MeshPhysicalMaterial({
+    color: "#ffffff",
+    map: trayTex.map,
+    bumpMap: trayTex.bump,
+    bumpScale: 0.6,
+    roughness: 0.62,
+    clearcoat: 0.35,
+    clearcoatRoughness: 0.45,
+  });
+  const trayProfile = [
+    [1.9, -1.26],
+    [2.22, -1.26],
+    [2.3, -1.2],
+    [2.36, -1.0],
+    [2.38, -0.84],
+    [2.35, -0.78],
+    [2.29, -0.77],
+    [2.23, -0.8],
+    [2.2, -0.86],
+    [2.17, -0.92],
+    [1.9, -0.93],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const shell = new THREE.Mesh(
+    new THREE.LatheGeometry(new THREE.SplineCurve(trayProfile).getPoints(80), 160),
     ceramic,
   );
-  base.scale.z = 0.7;
-  base.position.y = -1.04;
-  base.castShadow = base.receiveShadow = true;
-  tray.add(base);
-  const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(2.23, 0.065, 12, 128),
-    ceramic,
-  );
-  rim.rotation.x = Math.PI / 2;
-  rim.scale.y = 0.7;
-  rim.position.y = -0.88;
-  rim.castShadow = rim.receiveShadow = true;
-  tray.add(rim);
+  shell.scale.z = 1.46 / 2.18;
+  shell.castShadow = shell.receiveShadow = true;
+  tray.add(shell);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(2.0, 96), ceramic);
+  floor.rotation.x = -Math.PI / 2;
+  floor.scale.y = 1.46 / 2.18;
+  floor.position.y = -0.925;
+  tray.add(floor);
   const foot = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.84, 1.88, 0.1, 72),
+    new THREE.CylinderGeometry(1.9, 1.94, 0.06, 96),
     materials.darkMetal,
   );
-  foot.scale.z = 0.7;
-  foot.position.y = -1.21;
+  foot.scale.z = 1.46 / 2.18;
+  foot.position.y = -1.27;
   foot.castShadow = foot.receiveShadow = true;
   tray.add(foot);
 
@@ -43,34 +67,33 @@ export function createSandscape({ model, materials, palette }) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     return seed / 4294967296;
   }
-  const textureSize = 128;
-  const textureData = new Uint8Array(textureSize * textureSize * 4);
-  for (let i = 0; i < textureData.length; i += 4) {
-    const value = 145 + Math.floor(random() * 110);
-    textureData[i] = textureData[i + 1] = textureData[i + 2] = value;
-    textureData[i + 3] = 255;
-  }
-  const grain = new THREE.DataTexture(
-    textureData,
-    textureSize,
-    textureSize,
-    THREE.RGBAFormat,
-  );
-  grain.wrapS = grain.wrapT = THREE.RepeatWrapping;
-  grain.repeat.set(4, 3);
-  grain.magFilter = THREE.LinearFilter;
-  grain.minFilter = THREE.LinearMipmapLinearFilter;
-  grain.generateMipmaps = true;
-  grain.needsUpdate = true;
-  const sandMaterial = new THREE.MeshStandardMaterial({
-    color: "#c5ab7a",
-    roughness: 1,
-    metalness: 0,
-    map: grain,
-    bumpMap: grain,
-    bumpScale: 0.026,
-    roughnessMap: grain,
+  const sandTex = stoneTextures({
+    size: 512,
+    base: "#b4a07b",
+    dark: "#a28f6b",
+    light: "#c4b291",
+    speckle: 1,
+    period: 12,
+    seed: 7,
+    repeat: [5, 3.4],
   });
+  const grain = sandTex.bump;
+  const sandMaterial = new THREE.MeshPhysicalMaterial({
+    color: "#ffffff",
+    map: sandTex.map,
+    roughness: 0.96,
+    metalness: 0,
+    bumpMap: grain,
+    bumpScale: 0.9,
+    sheen: 0.35,
+    sheenRoughness: 0.5,
+    sheenColor: new THREE.Color("#fff1d6"),
+  });
+  if (env) {
+    // Mostly lit by the low raking light, so every groove casts a shadow.
+    sandMaterial.envMap = env;
+    sandMaterial.envMapIntensity = 0.2;
+  }
 
   function hash(x, z) {
     let n = Math.imul(x, 374761393) ^ Math.imul(z, 668265263);
@@ -146,10 +169,10 @@ export function createSandscape({ model, materials, palette }) {
   const ballRadius = 0.095;
   const ball = new THREE.Mesh(
     new THREE.SphereGeometry(ballRadius, 32, 24),
-    new THREE.MeshStandardMaterial({
-      color: "#bbbcb8",
-      roughness: 0.23,
-      metalness: 0.95,
+    new THREE.MeshPhysicalMaterial({
+      color: "#e2e3e4",
+      roughness: 0.07,
+      metalness: 1,
     }),
   );
   ball.castShadow = ball.receiveShadow = true;
@@ -284,7 +307,7 @@ export function createSandscape({ model, materials, palette }) {
   function setPalette(p) {
     // Small mineral variations retain the material's natural sand identity.
     const accent = new THREE.Color(p?.a || "#c5ab7a");
-    sandMaterial.color.set("#c5ab7a").lerp(accent, 0.055);
+    sandMaterial.color.set("#ffffff").lerp(accent, 0.05);
   }
   setPalette(palette);
   update(0, 0, 0);
@@ -295,7 +318,10 @@ export function createSandscape({ model, materials, palette }) {
       nextTarget = elapsed;
     },
     dispose() {
-      grain.dispose();
+      sandTex.map.dispose();
+      sandTex.bump.dispose();
+      trayTex.map.dispose();
+      trayTex.bump.dispose();
     },
   };
 }
